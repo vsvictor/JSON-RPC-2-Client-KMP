@@ -1,0 +1,4 @@
+headers = jsonrpc_bridge.h
+package = com.vsvictor.jsonrpckmp.ffi
+staticLibraries = libjsonrpc_bridge.a
+linkerOpts = -framework Foundation -framework Security -framework Network -lc++ -lz

@@ -1,0 +1,7 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+**/build/
+src/androidMain/jniLibs/
+src/androidMain/kotlin/uniffi/json_rpc_2_ffi/json_rpc_2_ffi.kt
