@@ -520,98 +520,92 @@ index 581abfc..7d07cd3 100644
      /// Configure how many consecutive missed pong ticks trigger recovery.
      pub fn set_max_missed_pongs(&self, count: u32) -> Result<(), FfiError> {
          runtime().block_on(async { Ok(self.inner.set_max_missed_pongs(count).await?) })
-@@ -2612,6 +2620,65 @@ pub fn connect_ws_http3(options: QuicConnectOptions) -> Result<Arc<RpcClient>, F
- mod tests {
-     use super::*;
+diff --git a/json-rpc-2-client/tests/client.rs b/json-rpc-2-client/tests/client.rs
+--- a/json-rpc-2-client/tests/client.rs
++++ b/json-rpc-2-client/tests/client.rs
+@@ -159,7 +159,11 @@
+         .restore_results
+         .lock()
+         .expect("restore results mutex poisoned")
+-        .push_back(Err(TransportError::new("restore-failed")));
++        .extend([
++            Err(TransportError::new("restore-failed-1")),
++            Err(TransportError::new("restore-failed-2")),
++            Err(TransportError::new("restore-failed-3")),
++        ]);
  
-+    #[cfg(feature = "tcp")]
-+    #[test]
-+    fn mobile_liveness_tcp_ping_logs_do_not_interfere_with_rpc() {
-+        use std::io::{BufRead, BufReader, Write};
-+        use std::time::{Duration, Instant};
+     let client = RpcClient::new(transport);
+     client.set_max_missed_pongs(4).await.unwrap();
+@@ -172,7 +176,7 @@
+     })
+     .await
+     .expect("client never attempted reconnect");
+-    assert_eq!(restore_count.load(Ordering::Relaxed), 1);
++    assert_eq!(restore_count.load(Ordering::Relaxed), 3);
+ 
+     client.set_ping_frequency(0).await.unwrap();
+ }
+diff --git a/json-rpc-2-ffi/src/tests.rs b/json-rpc-2-ffi/src/tests.rs
+--- a/json-rpc-2-ffi/src/tests.rs
++++ b/json-rpc-2-ffi/src/tests.rs
+@@ -1,4 +1,60 @@
+ use super::*;
 +
-+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-+        let port = listener.local_addr().unwrap().port();
-+        let server = std::thread::spawn(move || {
-+            let (stream, _) = listener.accept().unwrap();
-+            stream
-+                .set_read_timeout(Some(Duration::from_secs(5)))
-+                .unwrap();
-+            let mut reader = BufReader::new(stream);
-+            let mut line = String::new();
-+            loop {
-+                line.clear();
-+                if reader.read_line(&mut line).unwrap() == 0 {
-+                    break;
-+                }
-+                if line.trim_end() == "#json-rpc-2-control-ping" {
-+                    reader
-+                        .get_mut()
-+                        .write_all(b"#json-rpc-2-control-pong\n")
-+                        .unwrap();
-+                } else {
-+                    let request: serde_json::Value = serde_json::from_str(&line).unwrap();
-+                    let response = serde_json::json!({
-+                        "jsonrpc": "2.0", "id": request["id"], "result": {"ok": true}
-+                    });
-+                    writeln!(reader.get_mut(), "{response}").unwrap();
-+                }
++#[cfg(feature = "tcp")]
++#[test]
++fn mobile_liveness_tcp_ping_logs_do_not_interfere_with_rpc() {
++    use std::io::{BufRead, BufReader, Write};
++    use std::time::{Duration, Instant};
++
++    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++    let port = listener.local_addr().unwrap().port();
++    let server = std::thread::spawn(move || {
++        let (stream, _) = listener.accept().unwrap();
++        stream
++            .set_read_timeout(Some(Duration::from_secs(5)))
++            .unwrap();
++        let mut reader = BufReader::new(stream);
++        let mut line = String::new();
++        loop {
++            line.clear();
++            if reader.read_line(&mut line).unwrap() == 0 {
++                break;
 +            }
-+        });
-+        let mut opts = options();
-+        opts.host = "127.0.0.1".into();
-+        opts.port = port;
-+        let client = RpcClient::connect(FfiTransportKind::Tcp, opts).unwrap();
-+        client.set_ping_frequency(50).unwrap();
-+        let deadline = Instant::now() + Duration::from_secs(3);
-+        let mut events = String::new();
-+        while events.matches("PONG:").count() < 2 {
-+            assert!(
-+                Instant::now() < deadline,
-+                "missing real TCP pongs: {events}"
-+            );
-+            events.push_str(&client.take_liveness_log());
-+            std::thread::sleep(Duration::from_millis(5));
++            if line.trim_end() == "#json-rpc-2-control-ping" {
++                reader
++                    .get_mut()
++                    .write_all(b"#json-rpc-2-control-pong\n")
++                    .unwrap();
++            } else {
++                let request: serde_json::Value = serde_json::from_str(&line).unwrap();
++                let response = serde_json::json!({
++                    "jsonrpc": "2.0", "id": request["id"], "result": {"ok": true}
++                });
++                writeln!(reader.get_mut(), "{response}").unwrap();
++            }
 +        }
-+        assert!(events.contains("PING:"));
-+        let result = client.call("echo".into(), None).unwrap();
-+        assert_eq!(
-+            serde_json::from_str::<serde_json::Value>(&result).unwrap(),
-+            serde_json::json!({"ok": true})
-+        );
-+        client.disconnect().unwrap();
-+        server.join().unwrap();
++    });
++    let mut opts = options();
++    opts.host = "127.0.0.1".into();
++    opts.port = port;
++    let client = RpcClient::connect(FfiTransportKind::Tcp, opts).unwrap();
++    client.set_ping_frequency(50).unwrap();
++    let deadline = Instant::now() + Duration::from_secs(3);
++    let mut events = String::new();
++    while events.matches("PONG:").count() < 2 {
++        assert!(Instant::now() < deadline, "missing real TCP pongs: {events}");
++        events.push_str(&client.take_liveness_log());
++        std::thread::sleep(Duration::from_millis(5));
 +    }
-+
-     fn options() -> ConnectOptions {
-         ConnectOptions {
-             host: "localhost".into(),
-@@ -2642,16 +2709,25 @@ mod tests {
-             .pem();
-         let builder = RpcClientBuilder::new(FfiTransportKind::Quic, options());
-         builder.set_ca_certificate_pem(first.clone()).unwrap();
--        assert_eq!(builder.options.lock().unwrap().ca_pem.as_ref(), Some(&first));
-+        assert_eq!(
-+            builder.options.lock().unwrap().ca_pem.as_ref(),
-+            Some(&first)
-+        );
-         for invalid in ["", "not PEM"] {
-             assert!(matches!(
-                 builder.set_ca_certificate_pem(invalid.into()),
-                 Err(FfiError::InvalidConfiguration { .. })
-             ));
--            assert_eq!(builder.options.lock().unwrap().ca_pem.as_ref(), Some(&first));
-+            assert_eq!(
-+                builder.options.lock().unwrap().ca_pem.as_ref(),
-+                Some(&first)
-+            );
-         }
-         builder.set_ca_certificate_pem(second.clone()).unwrap();
--        assert_eq!(builder.options.lock().unwrap().ca_pem.as_ref(), Some(&second));
-+        assert_eq!(
-+            builder.options.lock().unwrap().ca_pem.as_ref(),
-+            Some(&second)
-+        );
-         runtime().block_on(async {
-             let endpoint = quic_endpoint(
-                 IpAddr::V4(Ipv4Addr::LOCALHOST),
++    assert!(events.contains("PING:"));
++    let result = client.call("echo".into(), None).unwrap();
++    assert_eq!(
++        serde_json::from_str::<serde_json::Value>(&result).unwrap(),
++        serde_json::json!({"ok": true})
++    );
++    client.disconnect().unwrap();
++    server.join().unwrap();
++}
+ 
+ fn options() -> ConnectOptions {
+     ConnectOptions {

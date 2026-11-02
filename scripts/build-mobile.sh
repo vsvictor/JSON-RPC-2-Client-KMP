@@ -4,7 +4,10 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UPSTREAM_URL="https://github.com/vsvictor/JSON-RPC-2.git"
 UPSTREAM_REF="${JSON_RPC_2_REF:-start}"
-UPSTREAM_DIR="$PROJECT_ROOT/build/upstream/JSON-RPC-2"
+UPSTREAM_DIR="${JSON_RPC_2_DIR:-$PROJECT_ROOT/build/upstream/JSON-RPC-2}"
+if [[ ! -f "$UPSTREAM_DIR/Cargo.toml" && -e "$UPSTREAM_DIR" ]]; then
+    UPSTREAM_DIR="${UPSTREAM_DIR}-refreshed"
+fi
 LIVENESS_PATCH="$PROJECT_ROOT/scripts/mobile-liveness.patch"
 GENERATED="$PROJECT_ROOT/build/generated"
 ANDROID_OUT="$PROJECT_ROOT/src/androidMain/jniLibs"
