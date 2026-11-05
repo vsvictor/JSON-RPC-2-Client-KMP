@@ -125,6 +125,9 @@ public func jsonrpc_client_connect(
         if let pem = options.caPem {
             try builder.setCaCertificatePem(pem: pem)
         }
+        if let connectTimeout = try unsigned(values, "connectTimeoutMs", as: UInt64.self) {
+            try builder.setConnectTimeoutMs(timeoutMs: connectTimeout)
+        }
         let client = try builder.connect()
         let retained = JsonRpcNativeClient(client)
         return Unmanaged.passRetained(retained).toOpaque()
@@ -209,6 +212,24 @@ public func jsonrpc_client_transport_ping(
     _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
 ) -> Int32 {
     perform(pointer, errorOut) { try $0.transportPing() }
+}
+
+@_cdecl("jsonrpc_client_transport_ping_with_timeout")
+public func jsonrpc_client_transport_ping_with_timeout(
+    _ pointer: UnsafeMutableRawPointer?,
+    _ timeout: UInt64,
+    _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Int32 {
+    perform(pointer, errorOut) { try $0.transportPingWithTimeout(timeoutMs: timeout) }
+}
+
+@_cdecl("jsonrpc_client_restore_connection")
+public func jsonrpc_client_restore_connection(
+    _ pointer: UnsafeMutableRawPointer?,
+    _ timeout: UInt64,
+    _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Int32 {
+    perform(pointer, errorOut) { try $0.restoreConnection(timeoutMs: timeout) }
 }
 
 @_cdecl("jsonrpc_client_set_ping_frequency")

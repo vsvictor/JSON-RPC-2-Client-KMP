@@ -62,6 +62,7 @@ internal data class NativeConnectionOptions(
     val udpLiteSendCoverage: UShort?,
     val udpLiteReceiveCoverage: UShort?,
     val broker: BrokerOptions,
+    val connectTimeoutMillis: ULong? = null,
 ) {
     fun toJson(): String = buildString {
         append('{')
@@ -78,6 +79,7 @@ internal data class NativeConnectionOptions(
         appendJson("brokerCaPem", broker.caCertificatePem)
         appendNumber("brokerOperationTimeoutMs", broker.operationTimeoutMillis?.toString())
         appendNumber("brokerResponseTimeoutMs", broker.responseTimeoutMillis?.toString())
+        connectTimeoutMillis?.let { appendNumber("connectTimeoutMs", it.toString()) }
         append('}')
     }
 
@@ -118,6 +120,8 @@ internal interface PlatformRpcClient {
     fun call(method: String, paramsJson: String?): String
     fun notify(method: String, paramsJson: String?)
     fun transportPing()
+    fun transportPing(timeoutMillis: ULong)
+    fun restoreConnection(timeoutMillis: ULong)
     fun setPingFrequency(frequencyMillis: ULong)
     fun setMaxMissedPongs(count: UInt)
     fun setRequestTimeout(timeoutMillis: ULong)
@@ -149,6 +153,28 @@ class JsonRpcClient internal constructor(private val native: PlatformRpcClient) 
     suspend fun transportPing() = withContext(Dispatchers.Default) {
         checkConnected()
         native.transportPing()
+    }
+
+    /**
+     * Sends one transport-level ping. The deadline is enforced inside the native
+     * Rust runtime; a missing pong fails with [IllegalStateException] (iOS) or
+     * the UniFFI transport exception (Android). Never schedules further pings.
+     */
+    suspend fun transportPing(timeoutMillis: ULong): Unit = withContext(Dispatchers.Default) {
+        require(timeoutMillis > 0uL) { "Transport ping timeout must be greater than zero" }
+        checkConnected()
+        native.transportPing(timeoutMillis)
+    }
+
+    /**
+     * Runs one in-place restore of this client's existing transport (no new
+     * client is created). The deadline is enforced inside the native Rust
+     * runtime. Retry, fallback and reconnect policy belong to the caller.
+     */
+    suspend fun restoreConnection(timeoutMillis: ULong): Unit = withContext(Dispatchers.Default) {
+        require(timeoutMillis > 0uL) { "Restore timeout must be greater than zero" }
+        checkConnected()
+        native.restoreConnection(timeoutMillis)
     }
 
     suspend fun setPingFrequency(frequencyMillis: ULong) = withContext(Dispatchers.Default) {
@@ -206,6 +232,7 @@ class JsonRpcClientBuilder(
     private var brokerOptions = BrokerOptions()
     private var pingFrequencyMillis = 1000uL
     private var maxMissedPongs = 3u
+    private var connectTimeoutMillis: ULong? = null
 
     companion object {
         fun builder(transport: RpcTransport, host: String, port: Int) =
@@ -253,12 +280,21 @@ class JsonRpcClientBuilder(
 
     fun broker(options: BrokerOptions) = apply { brokerOptions = options }
     fun pingFrequency(frequencyMillis: ULong) = apply { pingFrequencyMillis = frequencyMillis }
+    /**
+     * Bounds name resolution and transport handshake in [connect]; the deadline
+     * is enforced inside the native Rust runtime. Unset means no bound.
+     */
+    fun connectTimeout(timeoutMillis: ULong) = apply {
+        require(timeoutMillis > 0uL) { "Connect timeout must be greater than zero" }
+        connectTimeoutMillis = timeoutMillis
+    }
+
     fun maxMissedPongs(count: UInt) = apply {
         require(count > 0u) { "Maximum missed pongs must be greater than zero" }
         maxMissedPongs = count
     }
 
-    suspend fun connect(): JsonRpcClient = withContext(Dispatchers.Default) {
+    suspend fun connect(): JsonRpcClient {
         require(host.isNotBlank()) { "Host must not be blank" }
         require(port in 1..65535) { "Port must be between 1 and 65535" }
         require(transport != RpcTransport.SRT && transport != RpcTransport.WS_SRT || !srtPassphrase.isNullOrBlank()) {
@@ -267,24 +303,30 @@ class JsonRpcClientBuilder(
         if (!transport.supportedOnIos && isIosPlatform) {
             throw UnsupportedOperationException("${transport.name} is not available on iOS in json-rpc-2")
         }
-        val native = connectPlatform(
-            NativeConnectionOptions(
-                transport = transport,
-                host = host,
-                port = port.toUShort(),
-                caCertificatePem = caCertificatePem,
-                serverName = serverName,
-                srtPassphrase = srtPassphrase,
-                udpLiteSendCoverage = udpLiteSendCoverage,
-                udpLiteReceiveCoverage = udpLiteReceiveCoverage,
-                broker = brokerOptions,
-            )
-        )
+        var acquired: PlatformRpcClient? = null
         try {
-            native.setMaxMissedPongs(maxMissedPongs)
-            native.setPingFrequency(pingFrequencyMillis)
-            JsonRpcClient(native)
+            return withContext(Dispatchers.Default) {
+                val native = connectPlatform(
+                    NativeConnectionOptions(
+                        transport = transport,
+                        host = host,
+                        port = port.toUShort(),
+                        caCertificatePem = caCertificatePem,
+                        serverName = serverName,
+                        srtPassphrase = srtPassphrase,
+                        udpLiteSendCoverage = udpLiteSendCoverage,
+                        udpLiteReceiveCoverage = udpLiteReceiveCoverage,
+                        broker = brokerOptions,
+                        connectTimeoutMillis = connectTimeoutMillis,
+                    )
+                )
+                acquired = native
+                native.setMaxMissedPongs(maxMissedPongs)
+                native.setPingFrequency(pingFrequencyMillis)
+                JsonRpcClient(native)
+            }
         } catch (error: Throwable) {
+            val native = acquired ?: throw error
             try {
                 native.disconnect()
             } catch (cleanupError: Throwable) {

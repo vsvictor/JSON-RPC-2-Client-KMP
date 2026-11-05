@@ -120,6 +120,14 @@ class JsonRpcClientTest {
             calls += "ping"
         }
 
+        override fun transportPing(timeoutMillis: ULong) {
+            calls += "ping $timeoutMillis"
+        }
+
+        override fun restoreConnection(timeoutMillis: ULong) {
+            calls += "restore $timeoutMillis"
+        }
+
         override fun setPingFrequency(frequencyMillis: ULong) {
             calls += "frequency $frequencyMillis"
         }

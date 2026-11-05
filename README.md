@@ -65,6 +65,32 @@ In **Runtime controls**, **Log every periodic ping-pong** only controls visibili
 
 `scripts/mobile-liveness.patch` supplies the native recovery/logging changes and is reapplied by `scripts/build-mobile.sh` before building the FFI and generating Android/iOS bindings.
 
+### Application-owned lifecycle / Життєвий цикл під керуванням застосунку
+
+Set `builder.pingFrequency(0uL)` to disable the native periodic ping/recovery loop when the
+application owns liveness policy. `client.transportPing(timeoutMillis)` sends one transport ping
+and requires a pong before its native deadline; `client.restoreConnection(timeoutMillis)` makes
+one in-place restore attempt on the existing transport, without creating a new client or starting
+background checks. A successful restore must be followed by a ping to verify liveness.
+`builder.connectTimeout(timeoutMillis)` bounds DNS resolution and connection handshake. All
+three deadlines run inside Rust, so they also bound blocking Android/iOS FFI calls. Values must be
+greater than zero. Existing `transportPing()` and default automatic monitoring remain compatible.
+Fallback, retry thresholds, transport upgrades, and ownership of old/candidate connections belong
+to the consuming application. Rebuild both native artifacts and generated bindings after updating
+these APIs.
+
+Якщо застосунок сам керує перевіркою з'єднання, `builder.pingFrequency(0uL)` вимикає нативний
+періодичний цикл ping і відновлення. `client.transportPing(timeoutMillis)` надсилає один
+транспортний ping та очікує pong до нативного дедлайну; `client.restoreConnection(timeoutMillis)`
+виконує одну спробу відновлення наявного транспорту без створення нового клієнта чи запуску
+фонових перевірок. Після успішного відновлення потрібен ping для підтвердження працездатності.
+`builder.connectTimeout(timeoutMillis)` обмежує час DNS і встановлення з'єднання. Усі три
+тайм-аути виконуються всередині Rust та обмежують блокувальні FFI-виклики Android/iOS; значення
+мають бути більші за нуль. Наявний `transportPing()` та автоматичний моніторинг за замовчуванням
+зберігають сумісність. Резервні транспорти, пороги повторів, підвищення транспорту й закриття
+старих/кандидатних з'єднань контролює застосунок. Після оновлення API потрібно перезібрати
+нативні артефакти та згенеровані прив'язки.
+
 ## Certificates and platform assets
 
 Provide certificate contents directly with `caCertificatePem`, or use `caCertificate(bytes, CertificateFormat.PEM/DER)`. DER X.509 bytes are base64-wrapped as a PEM `CERTIFICATE` block before they reach the Rust API.

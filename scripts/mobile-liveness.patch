@@ -1,5 +1,5 @@
 diff --git a/json-rpc-2-client/src/lib.rs b/json-rpc-2-client/src/lib.rs
-index beefe11..d3cba24 100644
+index 44de8db..4f2b912 100644
 --- a/json-rpc-2-client/src/lib.rs
 +++ b/json-rpc-2-client/src/lib.rs
 @@ -6,7 +6,7 @@ pub use json_rpc_2_transport::*;
@@ -43,7 +43,23 @@ index beefe11..d3cba24 100644
  }
  
  /// A request to include in a JSON-RPC batch.
-@@ -276,6 +292,8 @@ where
+@@ -236,6 +252,15 @@ pub struct BatchResponse {
+     pub result: Result<Value, RpcError>,
+ }
+ 
++fn validate_manual_timeout(operation: &str, timeout: Duration) -> Result<(), RpcClientError> {
++    if timeout.is_zero() {
++        return Err(RpcClientError::InvalidConfiguration(format!(
++            "{operation} timeout must be greater than zero"
++        )));
++    }
++    Ok(())
++}
++
+ /// Cloneable client. Clones share the request ID sequence and transport.
+ pub struct RpcClient<T> {
+     state: Arc<RpcClientState<T>>,
+@@ -276,6 +301,8 @@ where
                  ping_task: Arc::new(Mutex::new(None)),
                  metrics,
                  closed: Arc::new(AtomicBool::new(false)),
@@ -52,7 +68,7 @@ index beefe11..d3cba24 100644
              }),
          })
      }
-@@ -294,6 +312,27 @@ where
+@@ -294,6 +321,27 @@ where
          self.state.metrics.snapshot()
      }
  
@@ -80,7 +96,7 @@ index beefe11..d3cba24 100644
      /// Gracefully close the underlying transport and stop the shared client
      /// session. Shared by all clones.
      pub async fn close(&self) -> Result<(), RpcClientError> {
-@@ -415,6 +454,9 @@ where
+@@ -415,6 +463,9 @@ where
          }
  
          let mut ping_task = self.state.ping_task.lock().await;
@@ -90,7 +106,7 @@ index beefe11..d3cba24 100644
          if let Some(task) = ping_task.take() {
              task.abort();
          }
-@@ -435,11 +477,21 @@ where
+@@ -435,11 +486,21 @@ where
                  .unwrap_or_else(|| "unknown".to_owned());
              loop {
                  interval.tick().await;
@@ -113,7 +129,7 @@ index beefe11..d3cba24 100644
                      }
                      Err(error) => {
                          let liveness = state
-@@ -461,6 +513,9 @@ where
+@@ -461,6 +522,9 @@ where
                              "transport ping failed"
                          );
                          let threshold = liveness.max_missed_pongs.max(1);
@@ -123,7 +139,7 @@ index beefe11..d3cba24 100644
                          if missed_pongs < threshold {
                              continue;
                          }
-@@ -481,21 +536,42 @@ where
+@@ -481,21 +545,42 @@ where
                                  missed_pongs,
                                  "missed pong threshold reached, attempting restore"
                              );
@@ -179,7 +195,7 @@ index beefe11..d3cba24 100644
                          }
                          let Some(backoff) = reconnect_state.next_delay(&reconnect) else {
                              warn!(
-@@ -503,6 +579,7 @@ where
+@@ -503,6 +588,7 @@ where
                                  peer, "reconnect budget exhausted for current failure streak"
                              );
                              reconnect_state.reset();
@@ -187,7 +203,7 @@ index beefe11..d3cba24 100644
                              continue;
                          };
                          if !backoff.is_zero() {
-@@ -514,13 +591,29 @@ where
+@@ -514,13 +600,29 @@ where
                              );
                              tokio::time::sleep(backoff).await;
                          }
@@ -218,7 +234,7 @@ index beefe11..d3cba24 100644
                                  error!(
                                      transport = transport_kind,
                                      peer,
-@@ -555,10 +648,22 @@ where
+@@ -555,10 +657,92 @@ where
      /// Perform a transport-level liveness check that bypasses JSON-RPC.
      pub async fn transport_ping(&self) -> Result<(), RpcClientError> {
          self.state
@@ -239,10 +255,80 @@ index beefe11..d3cba24 100644
 +                .log_liveness(format!("ERROR: manual ping failed: {error}")),
 +        }
 +        result
++    }
++
++    /// Perform one manual transport-level ping bounded by `timeout` inside the
++    /// async runtime. Does not touch periodic ping scheduling or missed-pong
++    /// accounting; callers own liveness policy.
++    pub async fn transport_ping_with_timeout(
++        &self,
++        timeout: Duration,
++    ) -> Result<(), RpcClientError> {
++        validate_manual_timeout("transport ping", timeout)?;
++        if self.state.closed.load(Ordering::SeqCst) {
++            return Err(RpcClientError::SessionClosed);
++        }
++        let timeout_ms = timeout.as_millis();
++        self.state.log_liveness(format!(
++            "PING: manual transport ping (timeout {timeout_ms} ms)"
++        ));
++        let result = tokio::time::timeout(timeout, self.state.transport.transport_ping())
++            .await
++            .unwrap_or_else(|_| {
++                Err(TransportError::new(format!(
++                    "pong deadline exceeded after {timeout_ms} ms"
++                )))
++            })
++            .map_err(RpcClientError::Transport);
++        match &result {
++            Ok(()) => self
++                .state
++                .log_liveness("PONG: manual transport pong received".to_owned()),
++            Err(error) => self
++                .state
++                .log_liveness(format!("ERROR: manual ping failed: {error}")),
++        }
++        result
++    }
++
++    /// Restore the existing transport connection in place (the transport's
++    /// own `restore`, not a new client) bounded by `timeout` inside the async
++    /// runtime. Performs exactly one attempt; retry policy belongs to callers.
++    pub async fn restore_connection(&self, timeout: Duration) -> Result<(), RpcClientError> {
++        validate_manual_timeout("restore", timeout)?;
++        if self.state.closed.load(Ordering::SeqCst) {
++            return Err(RpcClientError::SessionClosed);
++        }
++        let timeout_ms = timeout.as_millis();
++        self.state.log_liveness(format!(
++            "RESTORE: manual restore (timeout {timeout_ms} ms)"
++        ));
++        let result = tokio::time::timeout(timeout, self.state.transport.restore())
++            .await
++            .unwrap_or_else(|_| {
++                Err(TransportError::new(format!(
++                    "restore deadline exceeded after {timeout_ms} ms"
++                )))
++            })
++            .map_err(RpcClientError::Transport);
++        match &result {
++            Ok(()) => {
++                self.state
++                    .metrics
++                    .missed_pong_streak
++                    .store(0, Ordering::Relaxed);
++                self.state
++                    .log_liveness("RESTORED: manual restore succeeded".to_owned());
++            }
++            Err(error) => self
++                .state
++                .log_liveness(format!("ERROR: manual restore failed: {error}")),
++        }
++        result
      }
  
      /// Perform a call with serializable structured parameters and decode the
-@@ -1275,6 +1380,7 @@ fn parse_response(value: Value) -> Result<(RpcId, Result<Value, RpcError>), RpcC
+@@ -1294,6 +1478,7 @@ fn parse_response(value: Value) -> Result<(RpcId, Result<Value, RpcError>), RpcC
              "jsonrpc must be \"2.0\"".to_owned(),
          ));
      }
@@ -250,7 +336,7 @@ index beefe11..d3cba24 100644
      let id: RpcId = serde_json::from_value(
          object
              .get("id")
-@@ -1294,3 +1400,201 @@ fn parse_response(value: Value) -> Result<(RpcId, Result<Value, RpcError>), RpcC
+@@ -1313,3 +1498,201 @@ fn parse_response(value: Value) -> Result<(RpcId, Result<Value, RpcError>), RpcC
          )),
      }
  }
@@ -452,8 +538,171 @@ index beefe11..d3cba24 100644
 +        );
 +    }
 +}
+diff --git a/json-rpc-2-client/tests/client.rs b/json-rpc-2-client/tests/client.rs
+index 22ad778..95bc4cf 100644
+--- a/json-rpc-2-client/tests/client.rs
++++ b/json-rpc-2-client/tests/client.rs
+@@ -159,7 +159,11 @@ async fn set_ping_frequency_uses_restore_then_reconnect_after_threshold() {
+         .restore_results
+         .lock()
+         .expect("restore results mutex poisoned")
+-        .push_back(Err(TransportError::new("restore-failed")));
++        .extend([
++            Err(TransportError::new("restore-failed-1")),
++            Err(TransportError::new("restore-failed-2")),
++            Err(TransportError::new("restore-failed-3")),
++        ]);
+ 
+     let client = RpcClient::new(transport);
+     client.set_max_missed_pongs(4).await.unwrap();
+@@ -172,7 +176,7 @@ async fn set_ping_frequency_uses_restore_then_reconnect_after_threshold() {
+     })
+     .await
+     .expect("client never attempted reconnect");
+-    assert_eq!(restore_count.load(Ordering::Relaxed), 1);
++    assert_eq!(restore_count.load(Ordering::Relaxed), 3);
+ 
+     client.set_ping_frequency(0).await.unwrap();
+ }
+diff --git a/json-rpc-2-client/tests/tests.rs b/json-rpc-2-client/tests/tests.rs
+new file mode 100644
+index 0000000..742be45
+--- /dev/null
++++ b/json-rpc-2-client/tests/tests.rs
+@@ -0,0 +1,131 @@
++use std::future::pending;
++use std::sync::{
++    Arc,
++    atomic::{AtomicBool, AtomicUsize, Ordering},
++};
++use std::time::{Duration, Instant};
++
++use bytes::Bytes;
++
++use json_rpc_2_client::{
++    ClientCloseFuture, ClientPingFuture, ClientRecoverFuture, ClientTransportFuture, RpcClient,
++    RpcClientError, RpcClientTransport,
++};
++
++#[derive(Default)]
++struct HangingTransport {
++    hang: AtomicBool,
++    pings: Arc<AtomicUsize>,
++    restores: Arc<AtomicUsize>,
++    reconnects: Arc<AtomicUsize>,
++}
++
++impl RpcClientTransport for HangingTransport {
++    fn send<'a>(&'a self, _message: Bytes) -> ClientTransportFuture<'a> {
++        Box::pin(async { Ok(None) })
++    }
++
++    fn close<'a>(&'a self) -> ClientCloseFuture<'a> {
++        Box::pin(async { Ok(()) })
++    }
++
++    fn transport_ping<'a>(&'a self) -> ClientPingFuture<'a> {
++        Box::pin(async move {
++            self.pings.fetch_add(1, Ordering::SeqCst);
++            if self.hang.load(Ordering::SeqCst) {
++                pending::<()>().await;
++            }
++            Ok(())
++        })
++    }
++
++    fn restore<'a>(&'a self) -> ClientRecoverFuture<'a> {
++        Box::pin(async move {
++            self.restores.fetch_add(1, Ordering::SeqCst);
++            if self.hang.load(Ordering::SeqCst) {
++                pending::<()>().await;
++            }
++            Ok(())
++        })
++    }
++
++    fn reconnect<'a>(&'a self) -> ClientRecoverFuture<'a> {
++        Box::pin(async move {
++            self.reconnects.fetch_add(1, Ordering::SeqCst);
++            Ok(())
++        })
++    }
++}
++
++#[tokio::test]
++async fn bounded_ping_and_restore_succeed_on_live_transport() {
++    let transport = HangingTransport::default();
++    let (pings, restores, reconnects) = (
++        transport.pings.clone(),
++        transport.restores.clone(),
++        transport.reconnects.clone(),
++    );
++    let client = RpcClient::new(transport);
++
++    client
++        .transport_ping_with_timeout(Duration::from_millis(100))
++        .await
++        .unwrap();
++    client
++        .restore_connection(Duration::from_millis(100))
++        .await
++        .unwrap();
++
++    assert_eq!(pings.load(Ordering::SeqCst), 1);
++    assert_eq!(restores.load(Ordering::SeqCst), 1);
++    assert_eq!(reconnects.load(Ordering::SeqCst), 0);
++    let log = client.take_liveness_log();
++    assert!(log.contains("PONG: manual transport pong received"), "{log}");
++    assert!(log.contains("RESTORED: manual restore succeeded"), "{log}");
++}
++
++#[tokio::test]
++async fn bounded_ping_and_restore_time_out_inside_runtime() {
++    let transport = HangingTransport::default();
++    transport.hang.store(true, Ordering::SeqCst);
++    let (restores, reconnects) = (transport.restores.clone(), transport.reconnects.clone());
++    let client = RpcClient::new(transport);
++
++    let started = Instant::now();
++    let ping = client
++        .transport_ping_with_timeout(Duration::from_millis(50))
++        .await
++        .unwrap_err();
++    let restore = client
++        .restore_connection(Duration::from_millis(50))
++        .await
++        .unwrap_err();
++
++    assert!(started.elapsed() < Duration::from_secs(2));
++    assert!(ping.to_string().contains("pong deadline exceeded after 50 ms"), "{ping}");
++    assert!(restore.to_string().contains("restore deadline exceeded after 50 ms"), "{restore}");
++    assert_eq!(restores.load(Ordering::SeqCst), 1, "restore must be a single attempt");
++    assert_eq!(reconnects.load(Ordering::SeqCst), 0, "restore must not rebuild the client");
++}
++
++#[tokio::test]
++async fn bounded_operations_reject_zero_timeout_and_closed_client() {
++    let client = RpcClient::new(HangingTransport::default());
++    assert!(matches!(
++        client.transport_ping_with_timeout(Duration::ZERO).await,
++        Err(RpcClientError::InvalidConfiguration(_))
++    ));
++    assert!(matches!(
++        client.restore_connection(Duration::ZERO).await,
++        Err(RpcClientError::InvalidConfiguration(_))
++    ));
++    client.close().await.unwrap();
++    assert!(matches!(
++        client.transport_ping_with_timeout(Duration::from_millis(10)).await,
++        Err(RpcClientError::SessionClosed)
++    ));
++    assert!(matches!(
++        client.restore_connection(Duration::from_millis(10)).await,
++        Err(RpcClientError::SessionClosed)
++    ));
++}
 diff --git a/json-rpc-2-ffi/src/lib.rs b/json-rpc-2-ffi/src/lib.rs
-index 581abfc..7d07cd3 100644
+index 48ab388..16928ca 100644
 --- a/json-rpc-2-ffi/src/lib.rs
 +++ b/json-rpc-2-ffi/src/lib.rs
 @@ -992,9 +992,7 @@ impl RpcClientTransport for AnyTransport {
@@ -477,7 +726,79 @@ index 581abfc..7d07cd3 100644
      tls.endpoint(SocketAddr::new(local, 0), alpn)
          .map_err(transport_error)
  }
-@@ -2197,7 +2196,9 @@ impl RpcClient {
+@@ -1870,6 +1869,7 @@ fn quic_endpoint(
+ pub struct RpcClientBuilder {
+     kind: FfiTransportKind,
+     options: std::sync::Mutex<ConnectOptions>,
++    connect_timeout_ms: std::sync::Mutex<Option<u64>>,
+ }
+ 
+ #[cfg(any(feature = "quic", feature = "http3"))]
+@@ -1880,6 +1880,7 @@ impl RpcClientBuilder {
+         Arc::new(Self {
+             kind,
+             options: std::sync::Mutex::new(options),
++            connect_timeout_ms: std::sync::Mutex::new(None),
+         })
+     }
+ 
+@@ -1899,6 +1900,19 @@ impl RpcClientBuilder {
+         Ok(())
+     }
+ 
++    /// Bound name resolution plus transport handshake of [`Self::connect`]
++    /// with a deadline enforced by the Tokio runtime. Must be non-zero.
++    pub fn set_connect_timeout_ms(&self, timeout_ms: u64) -> Result<(), FfiError> {
++        manual_timeout("connect", timeout_ms)?;
++        *self
++            .connect_timeout_ms
++            .lock()
++            .map_err(|error| FfiError::InvalidConfiguration {
++                details: error.to_string(),
++            })? = Some(timeout_ms);
++        Ok(())
++    }
++
+     pub fn connect(&self) -> Result<Arc<RpcClient>, FfiError> {
+         let options = self
+             .options
+@@ -1907,7 +1921,13 @@ impl RpcClientBuilder {
+                 details: error.to_string(),
+             })?
+             .clone();
+-        RpcClient::connect(self.kind, options)
++        let timeout_ms = *self
++            .connect_timeout_ms
++            .lock()
++            .map_err(|error| FfiError::InvalidConfiguration {
++                details: error.to_string(),
++            })?;
++        RpcClient::connect_bounded(self.kind, options, timeout_ms)
+     }
+ }
+ 
+@@ -1925,7 +1945,19 @@ impl RpcClient {
+     /// is required for `srt` and `ws-srt`.
+     #[uniffi::constructor]
+     pub fn connect(kind: FfiTransportKind, options: ConnectOptions) -> Result<Arc<Self>, FfiError> {
+-        runtime().block_on(async move {
++        Self::connect_bounded(kind, options, None)
++    }
++}
++
++impl RpcClient {
++    /// Connect, optionally bounding resolution and handshake with a timeout
++    /// enforced inside the Tokio runtime.
++    fn connect_bounded(
++        kind: FfiTransportKind,
++        options: ConnectOptions,
++        timeout_ms: Option<u64>,
++    ) -> Result<Arc<Self>, FfiError> {
++        let connect = async move {
+             validate_broker_options(kind, &options)?;
+             let to = if kind.is_external_broker() {
+                 SocketAddr::from(([127, 0, 0, 1], 0))
+@@ -2197,7 +2229,9 @@ impl RpcClient {
                      #[cfg(not(any(target_os = "linux", target_os = "android")))]
                      {
                          return Err(FfiError::InvalidConfiguration {
@@ -488,7 +809,7 @@ index 581abfc..7d07cd3 100644
                          });
                      }
                  }
-@@ -2214,7 +2215,8 @@ impl RpcClient {
+@@ -2214,7 +2248,8 @@ impl RpcClient {
                      #[cfg(not(any(target_os = "linux", target_os = "android")))]
                      {
                          return Err(FfiError::InvalidConfiguration {
@@ -498,7 +819,7 @@ index 581abfc..7d07cd3 100644
                          });
                      }
                  }
-@@ -2231,7 +2233,8 @@ impl RpcClient {
+@@ -2231,7 +2266,8 @@ impl RpcClient {
                      #[cfg(not(any(target_os = "linux", target_os = "android")))]
                      {
                          return Err(FfiError::InvalidConfiguration {
@@ -508,7 +829,68 @@ index 581abfc..7d07cd3 100644
                          });
                      }
                  }
-@@ -2367,6 +2370,11 @@ impl RpcClient {
+@@ -2314,9 +2350,36 @@ impl RpcClient {
+             };
+ 
+             Ok(wrap_client(transport))
+-        })
++        };
++        match timeout_ms {
++            None => runtime().block_on(connect),
++            Some(timeout_ms) => {
++                let timeout = manual_timeout("connect", timeout_ms)?;
++                runtime().block_on(async move {
++                    tokio::time::timeout(timeout, connect)
++                        .await
++                        .unwrap_or_else(|_| {
++                            Err(FfiError::Transport {
++                                details: format!("connect deadline exceeded after {timeout_ms} ms"),
++                            })
++                        })
++                })
++            }
++        }
++    }
++}
++
++fn manual_timeout(operation: &str, timeout_ms: u64) -> Result<Duration, FfiError> {
++    if timeout_ms == 0 {
++        return Err(FfiError::InvalidConfiguration {
++            details: format!("{operation} timeout must be greater than zero milliseconds"),
++        });
+     }
++    Ok(Duration::from_millis(timeout_ms))
++}
+ 
++#[uniffi::export]
++impl RpcClient {
+     /// Call a method and return its JSON-encoded result.
+     ///
+     /// `params_json`, when present, must be a JSON-encoded object or array.
+@@ -2359,6 +2422,22 @@ impl RpcClient {
+         runtime().block_on(async { Ok(self.inner.transport_ping().await?) })
+     }
+ 
++    /// Perform one transport-level ping/pong whose deadline is enforced by
++    /// the Tokio runtime. Does not change periodic ping scheduling.
++    pub fn transport_ping_with_timeout(&self, timeout_ms: u64) -> Result<(), FfiError> {
++        let timeout = manual_timeout("transport ping", timeout_ms)?;
++        runtime().block_on(async {
++            Ok(self.inner.transport_ping_with_timeout(timeout).await?)
++        })
++    }
++
++    /// Run one in-place restore of the existing transport connection (no new
++    /// client is created) whose deadline is enforced by the Tokio runtime.
++    pub fn restore_connection(&self, timeout_ms: u64) -> Result<(), FfiError> {
++        let timeout = manual_timeout("restore", timeout_ms)?;
++        runtime().block_on(async { Ok(self.inner.restore_connection(timeout).await?) })
++    }
++
+     /// Start (or stop) a periodic background transport-level ping used as
+     /// a keep-alive. `frequency_ms = 0` disables it. Pings run on the same
+     /// Tokio runtime as every other call and are stopped automatically by
+@@ -2367,6 +2446,11 @@ impl RpcClient {
          runtime().block_on(async { Ok(self.inner.set_ping_frequency(frequency_ms).await?) })
      }
  
@@ -520,37 +902,119 @@ index 581abfc..7d07cd3 100644
      /// Configure how many consecutive missed pong ticks trigger recovery.
      pub fn set_max_missed_pongs(&self, count: u32) -> Result<(), FfiError> {
          runtime().block_on(async { Ok(self.inner.set_max_missed_pongs(count).await?) })
-diff --git a/json-rpc-2-client/tests/client.rs b/json-rpc-2-client/tests/client.rs
---- a/json-rpc-2-client/tests/client.rs
-+++ b/json-rpc-2-client/tests/client.rs
-@@ -159,7 +159,11 @@
-         .restore_results
-         .lock()
-         .expect("restore results mutex poisoned")
--        .push_back(Err(TransportError::new("restore-failed")));
-+        .extend([
-+            Err(TransportError::new("restore-failed-1")),
-+            Err(TransportError::new("restore-failed-2")),
-+            Err(TransportError::new("restore-failed-3")),
-+        ]);
+@@ -2610,3 +2694,7 @@ pub fn connect_ws_http3(options: QuicConnectOptions) -> Result<Arc<RpcClient>, F
  
-     let client = RpcClient::new(transport);
-     client.set_max_missed_pongs(4).await.unwrap();
-@@ -172,7 +176,7 @@
-     })
-     .await
-     .expect("client never attempted reconnect");
--    assert_eq!(restore_count.load(Ordering::Relaxed), 1);
-+    assert_eq!(restore_count.load(Ordering::Relaxed), 3);
- 
-     client.set_ping_frequency(0).await.unwrap();
- }
+ #[cfg(test)]
+ mod tests;
++
++#[cfg(test)]
++#[path = "lifecycle/tests.rs"]
++mod lifecycle_tests;
+diff --git a/json-rpc-2-ffi/src/lifecycle/tests.rs b/json-rpc-2-ffi/src/lifecycle/tests.rs
+new file mode 100644
+index 0000000..32f4615
+--- /dev/null
++++ b/json-rpc-2-ffi/src/lifecycle/tests.rs
+@@ -0,0 +1,92 @@
++use super::*;
++use std::time::Instant;
++
++fn local_options(port: u16) -> ConnectOptions {
++    ConnectOptions {
++        host: "127.0.0.1".into(),
++        port,
++        ca_pem: None,
++        server_name: None,
++        srt_passphrase: None,
++        udplite_send_coverage: None,
++        udplite_recv_coverage: None,
++        broker_url: None,
++        broker_route: None,
++        broker_ca_pem: None,
++        broker_operation_timeout_ms: None,
++        broker_response_timeout_ms: None,
++    }
++}
++
++/// Accepts one TCP connection and keeps it open without ever answering.
++fn silent_server() -> (u16, std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
++    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++    let port = listener.local_addr().unwrap().port();
++    let (stop, stopped) = std::sync::mpsc::channel::<()>();
++    let server = std::thread::spawn(move || {
++        let (_stream, _) = listener.accept().unwrap();
++        let _ = stopped.recv_timeout(Duration::from_secs(10));
++    });
++    (port, stop, server)
++}
++
++#[cfg(feature = "tcp")]
++#[test]
++fn bounded_ping_and_restore_return_within_rust_deadline_on_silent_peer() {
++    let (port, stop, server) = silent_server();
++    let client = RpcClient::connect(FfiTransportKind::Tcp, local_options(port)).unwrap();
++
++    let started = Instant::now();
++    let ping = client.transport_ping_with_timeout(100).unwrap_err();
++    assert!(started.elapsed() < Duration::from_secs(2), "ping not bounded");
++    assert!(
++        matches!(&ping, FfiError::Transport { details } if details.contains("deadline exceeded after 100 ms")),
++        "{ping:?}"
++    );
++
++    let started = Instant::now();
++    let restore = client.restore_connection(100).unwrap_err();
++    assert!(started.elapsed() < Duration::from_secs(2), "restore not bounded");
++    assert!(matches!(restore, FfiError::Transport { .. }), "{restore:?}");
++
++    assert!(matches!(
++        client.transport_ping_with_timeout(0),
++        Err(FfiError::InvalidConfiguration { .. })
++    ));
++    assert!(matches!(
++        client.restore_connection(0),
++        Err(FfiError::InvalidConfiguration { .. })
++    ));
++    let _ = client.disconnect();
++    stop.send(()).unwrap();
++    server.join().unwrap();
++}
++
++#[cfg(all(feature = "tls", any(feature = "quic", feature = "http3")))]
++#[test]
++fn builder_connect_timeout_bounds_a_stalled_handshake() {
++    let (port, stop, server) = silent_server();
++    let ca = rcgen::generate_simple_self_signed(vec!["localhost".into()])
++        .unwrap()
++        .cert
++        .pem();
++    let mut options = local_options(port);
++    options.ca_pem = Some(ca);
++    options.server_name = Some("localhost".into());
++    let builder = RpcClientBuilder::new(FfiTransportKind::Tls, options);
++    assert!(matches!(
++        builder.set_connect_timeout_ms(0),
++        Err(FfiError::InvalidConfiguration { .. })
++    ));
++    builder.set_connect_timeout_ms(150).unwrap();
++
++    let started = Instant::now();
++    let error = builder.connect().err().expect("stalled TLS handshake must fail");
++    assert!(started.elapsed() < Duration::from_secs(3), "connect not bounded");
++    assert!(
++        matches!(&error, FfiError::Transport { details } if details.contains("connect deadline exceeded after 150 ms")),
++        "{error:?}"
++    );
++    stop.send(()).unwrap();
++    server.join().unwrap();
++}
 diff --git a/json-rpc-2-ffi/src/tests.rs b/json-rpc-2-ffi/src/tests.rs
+index c7fe193..accfa7a 100644
 --- a/json-rpc-2-ffi/src/tests.rs
 +++ b/json-rpc-2-ffi/src/tests.rs
-@@ -1,4 +1,60 @@
+@@ -1,5 +1,61 @@
  use super::*;
-+
+ 
 +#[cfg(feature = "tcp")]
 +#[test]
 +fn mobile_liveness_tcp_ping_logs_do_not_interfere_with_rpc() {
@@ -606,6 +1070,7 @@ diff --git a/json-rpc-2-ffi/src/tests.rs b/json-rpc-2-ffi/src/tests.rs
 +    client.disconnect().unwrap();
 +    server.join().unwrap();
 +}
- 
++
  fn options() -> ConnectOptions {
      ConnectOptions {
+         host: "localhost".into(),

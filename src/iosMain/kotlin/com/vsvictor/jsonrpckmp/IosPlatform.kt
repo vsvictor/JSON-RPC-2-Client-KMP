@@ -5,10 +5,12 @@ import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_connect
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_disconnect
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_notify
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_release
+import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_restore_connection
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_set_max_missed_pongs
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_set_ping_frequency
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_set_request_timeout
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_transport_ping
+import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_transport_ping_with_timeout
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_take_liveness_log
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_string_free
 import kotlinx.cinterop.ByteVar
@@ -90,6 +92,12 @@ private class IosRpcClient(private val handle: COpaquePointer) : PlatformRpcClie
     }
 
     override fun transportPing() = checked { error -> jsonrpc_client_transport_ping(handle, error) }
+    override fun transportPing(timeoutMillis: ULong) = checked { error ->
+        jsonrpc_client_transport_ping_with_timeout(handle, timeoutMillis, error)
+    }
+    override fun restoreConnection(timeoutMillis: ULong) = checked { error ->
+        jsonrpc_client_restore_connection(handle, timeoutMillis, error)
+    }
     override fun setPingFrequency(frequencyMillis: ULong) = checked { error ->
         jsonrpc_client_set_ping_frequency(handle, frequencyMillis, error)
     }

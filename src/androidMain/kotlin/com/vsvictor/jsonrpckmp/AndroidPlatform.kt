@@ -40,6 +40,7 @@ internal actual fun connectPlatform(options: NativeConnectionOptions): PlatformR
         .uppercase()
     val builder = RustRpcClientBuilder(FfiTransportKind.valueOf(ffiKind), ffiOptions)
     options.caCertificatePem?.let(builder::setCaCertificatePem)
+    options.connectTimeoutMillis?.let(builder::setConnectTimeoutMs)
     return AndroidRpcClient(builder.connect())
 }
 
@@ -56,6 +57,8 @@ private class AndroidRpcClient(private val client: RustRpcClient) : PlatformRpcC
     override fun call(method: String, paramsJson: String?) = client.call(method, paramsJson)
     override fun notify(method: String, paramsJson: String?) = client.notify(method, paramsJson)
     override fun transportPing() = client.transportPing()
+    override fun transportPing(timeoutMillis: ULong) = client.transportPingWithTimeout(timeoutMillis)
+    override fun restoreConnection(timeoutMillis: ULong) = client.restoreConnection(timeoutMillis)
     override fun setPingFrequency(frequencyMillis: ULong) = client.setPingFrequency(frequencyMillis)
     override fun setMaxMissedPongs(count: UInt) = client.setMaxMissedPongs(count)
     override fun setRequestTimeout(timeoutMillis: ULong) = client.setRequestTimeoutMs(timeoutMillis)

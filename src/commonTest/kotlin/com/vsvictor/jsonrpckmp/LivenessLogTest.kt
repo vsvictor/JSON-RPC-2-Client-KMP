@@ -46,6 +46,12 @@ class LivenessLogTest {
             pings++
         }
 
+        override fun transportPing(timeoutMillis: ULong) {
+            pings++
+        }
+
+        override fun restoreConnection(timeoutMillis: ULong) = Unit
+
         override fun setPingFrequency(frequencyMillis: ULong) {
             frequencyChanges++
         }
