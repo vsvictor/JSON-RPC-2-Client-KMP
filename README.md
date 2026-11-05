@@ -2,7 +2,11 @@
 
 A single Kotlin Multiplatform client for the Rust [`json-rpc-2`](https://github.com/vsvictor/JSON-RPC-2) client and its UniFFI API. The public API and client configuration live in `commonMain`; Android calls the generated UniFFI Kotlin/JNA binding, and iOS calls the same Rust FFI through a small Swift-to-C ABI bridge.
 
-The project is a single Gradle KMP module at the repository root. No Rust crate sources are vendored: `scripts/build-mobile.sh` fetches the selected revision from the remote GitHub repository before generating bindings and native libraries. Set `JSON_RPC_2_REF` to a tag, branch, or commit to select a different revision; it defaults to the upstream `start` branch.
+The project is a single Gradle KMP module at the repository root. No Rust crate sources are vendored: `scripts/build-mobile.sh` fetches the selected revision from the remote GitHub repository before generating bindings and native libraries. Set `JSON_RPC_2_REF` to a compatible tag, branch, or commit to select a different revision; it defaults to the pinned upstream commit listed below.
+
+Проєкт є одним Gradle KMP-модулем без копії Rust-коду. `scripts/build-mobile.sh` завантажує
+зафіксований нижче upstream-коміт перед генеруванням прив'язок і нативних бібліотек.
+`JSON_RPC_2_REF` дозволяє вибрати інший сумісний тег, гілку або коміт.
 
 ## Requirements
 
@@ -63,7 +67,13 @@ Each periodic ping and each restore attempt has a deadline equal to the configur
 
 In **Runtime controls**, **Log every periodic ping-pong** only controls visibility of native Ping/Pong events; it never starts a separate loop or disables recovery. Errors and recovery/reconnection events remain visible regardless of the checkbox. The panel retains the latest 500 entries. The native log buffer retains 512 entries and reports any overflow when drained. `client.takeLivenessLog()` drains these events without sending network traffic.
 
-`scripts/mobile-liveness.patch` supplies the native recovery/logging changes and is reapplied by `scripts/build-mobile.sh` before building the FFI and generating Android/iOS bindings.
+Native recovery, logging, and bounded lifecycle APIs are included in upstream JSON-RPC-2
+commit `e90318f1052d5b7b253c7e4c824aa53404703d23`, pinned by `scripts/build-mobile.sh`.
+No additional lifecycle patch is applied.
+
+Нативне відновлення, логування та API життєвого циклу з тайм-аутами включені в коміт
+JSON-RPC-2 `e90318f1052d5b7b253c7e4c824aa53404703d23`, зафіксований у `scripts/build-mobile.sh`.
+Додатковий патч життєвого циклу не накладається.
 
 ### Application-owned lifecycle / Життєвий цикл під керуванням застосунку
 

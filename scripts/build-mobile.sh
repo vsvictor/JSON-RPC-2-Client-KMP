@@ -3,12 +3,11 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UPSTREAM_URL="https://github.com/vsvictor/JSON-RPC-2.git"
-UPSTREAM_REF="${JSON_RPC_2_REF:-start}"
+UPSTREAM_REF="${JSON_RPC_2_REF:-e90318f1052d5b7b253c7e4c824aa53404703d23}"
 UPSTREAM_DIR="${JSON_RPC_2_DIR:-$PROJECT_ROOT/build/upstream/JSON-RPC-2}"
 if [[ ! -f "$UPSTREAM_DIR/Cargo.toml" && -e "$UPSTREAM_DIR" ]]; then
     UPSTREAM_DIR="${UPSTREAM_DIR}-refreshed"
 fi
-LIVENESS_PATCH="$PROJECT_ROOT/scripts/mobile-liveness.patch"
 GENERATED="$PROJECT_ROOT/build/generated"
 ANDROID_OUT="$PROJECT_ROOT/src/androidMain/jniLibs"
 IOS_OUT="$PROJECT_ROOT/build/native/ios"
@@ -67,8 +66,6 @@ git -C "$UPSTREAM_DIR" fetch --quiet --depth 1 origin "$UPSTREAM_REF"
 git -C "$UPSTREAM_DIR" checkout --quiet --force --detach FETCH_HEAD
 UPSTREAM_REVISION="$(git -C "$UPSTREAM_DIR" rev-parse HEAD)"
 echo "Using JSON-RPC-2 revision $UPSTREAM_REVISION"
-git -C "$UPSTREAM_DIR" apply --check "$LIVENESS_PATCH"
-git -C "$UPSTREAM_DIR" apply "$LIVENESS_PATCH"
 
 # The FFI crate disables tstrans-srt-sys default features. Enable its
 # bundled mbedTLS feature in this disposable checkout so SRT passphrases
