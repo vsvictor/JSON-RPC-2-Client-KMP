@@ -1,6 +1,7 @@
 package com.vsvictor.jsonrpckmp
 
 import android.content.Context
+import uniffi.json_rpc_2_ffi.CallbackHandler
 import uniffi.json_rpc_2_ffi.ConnectOptions
 import uniffi.json_rpc_2_ffi.FfiTransportKind
 import uniffi.json_rpc_2_ffi.RpcClient as RustRpcClient
@@ -54,6 +55,15 @@ internal actual fun readCertificateAsset(name: String): ByteArray {
 }
 
 private class AndroidRpcClient(private val client: RustRpcClient) : PlatformRpcClient {
+    override fun startCallbacks(listener: RpcCallbackListener) = client.startCallbacks(
+        object : CallbackHandler {
+            override fun onCallback(method: String, paramsJson: String?) =
+                listener.onCallback(method, paramsJson)
+
+            override fun onInterrupted() = listener.onInterrupted()
+        },
+    )
+    override fun stopCallbacks() = client.stopCallbacks()
     override fun call(method: String, paramsJson: String?) = client.call(method, paramsJson)
     override fun notify(method: String, paramsJson: String?) = client.notify(method, paramsJson)
     override fun transportPing() = client.transportPing()

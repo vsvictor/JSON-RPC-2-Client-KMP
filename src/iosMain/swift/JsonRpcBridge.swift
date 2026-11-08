@@ -285,6 +285,56 @@ private func perform(
     }
 }
 
+private final class SwiftCallbackHandler: CallbackHandler, @unchecked Sendable {
+    let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
+    let context: UnsafeMutableRawPointer?
+
+    init(
+        _ callback: @escaping @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void,
+        _ context: UnsafeMutableRawPointer?
+    ) {
+        self.callback = callback
+        self.context = context
+    }
+
+    func onCallback(method: String, paramsJson: String?) {
+        method.withCString { methodPointer in
+            if let paramsJson {
+                paramsJson.withCString { callback(context, methodPointer, $0) }
+            } else {
+                callback(context, methodPointer, nil)
+            }
+        }
+    }
+
+    func onInterrupted() {
+        callback(context, nil, nil)
+    }
+}
+
+@_cdecl("jsonrpc_client_start_callbacks")
+public func jsonrpc_client_start_callbacks(
+    _ pointer: UnsafeMutableRawPointer?,
+    _ callback: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void)?,
+    _ context: UnsafeMutableRawPointer?,
+    _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Int32 {
+    perform(pointer, errorOut) { client in
+        guard let callback else {
+            throw JsonRpcBridgeError.invalidOptions("Callback function is required")
+        }
+        try client.startCallbacks(handler: SwiftCallbackHandler(callback, context))
+    }
+}
+
+@_cdecl("jsonrpc_client_stop_callbacks")
+public func jsonrpc_client_stop_callbacks(
+    _ pointer: UnsafeMutableRawPointer?,
+    _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Int32 {
+    perform(pointer, errorOut) { try $0.stopCallbacks() }
+}
+
 @_cdecl("jsonrpc_client_release")
 public func jsonrpc_client_release(_ pointer: UnsafeMutableRawPointer?) {
     guard let pointer else { return }

@@ -15,6 +15,10 @@ int32_t jsonrpc_client_set_max_missed_pongs(void *client, uint32_t count, char *
 int32_t jsonrpc_client_set_request_timeout(void *client, uint64_t timeout_ms, char **error_out);
 int32_t jsonrpc_client_disconnect(void *client, char **error_out);
 void jsonrpc_client_release(void *client);
+/* `method` is NULL when the push stream was interrupted. */
+typedef void (*jsonrpc_callback_fn)(void *context, const char *method, const char *params_json);
+int32_t jsonrpc_client_start_callbacks(void *client, jsonrpc_callback_fn callback, void *context, char **error_out);
+int32_t jsonrpc_client_stop_callbacks(void *client, char **error_out);
 void jsonrpc_string_free(char *value);
 
 #endif

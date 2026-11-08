@@ -5,6 +5,8 @@ import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_connect
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_disconnect
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_notify
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_release
+import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_start_callbacks
+import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_stop_callbacks
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_restore_connection
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_set_max_missed_pongs
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_set_ping_frequency
@@ -19,6 +21,9 @@ import kotlinx.cinterop.CPointerVar
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.CValuesRef
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.StableRef
+import kotlinx.cinterop.asStableRef
+import kotlinx.cinterop.staticCFunction
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.memScoped
@@ -75,6 +80,28 @@ private fun NSData.toByteArray(): ByteArray {
 
 @OptIn(ExperimentalForeignApi::class)
 private class IosRpcClient(private val handle: COpaquePointer) : PlatformRpcClient {
+    private var callbackRef: StableRef<RpcCallbackListener>? = null
+
+    override fun startCallbacks(listener: RpcCallbackListener) {
+        val ref = StableRef.create(listener)
+        try {
+            checked { error ->
+                jsonrpc_client_start_callbacks(handle, DISPATCH_CALLBACK, ref.asCPointer(), error)
+            }
+        } catch (error: Throwable) {
+            ref.dispose()
+            throw error
+        }
+        callbackRef?.dispose()
+        callbackRef = ref
+    }
+
+    override fun stopCallbacks() {
+        checked { error -> jsonrpc_client_stop_callbacks(handle, error) }
+        callbackRef?.dispose()
+        callbackRef = null
+    }
+
     override fun call(method: String, paramsJson: String?): String = memScoped {
         val error = alloc<CPointerVar<ByteVar>>()
         error.value = null
@@ -119,13 +146,23 @@ private class IosRpcClient(private val handle: COpaquePointer) : PlatformRpcClie
             jsonrpc_string_free(result)
         }
     }
-    override fun release() = jsonrpc_client_release(handle)
+    override fun release() {
+        callbackRef?.dispose()
+        callbackRef = null
+        jsonrpc_client_release(handle)
+    }
 
     private inline fun checked(block: (CValuesRef<CPointerVar<ByteVar>>) -> Int) = memScoped {
         val error = alloc<CPointerVar<ByteVar>>()
         error.value = null
         if (block(error.ptr) != 0) throw ffiException(error.value)
     }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private val DISPATCH_CALLBACK = staticCFunction { context: COpaquePointer?, method: CPointer<ByteVar>?, params: CPointer<ByteVar>? ->
+    val listener = context?.asStableRef<RpcCallbackListener>()?.get() ?: return@staticCFunction
+    if (method == null) listener.onInterrupted() else listener.onCallback(method.toKString(), params?.toKString())
 }
 
 @OptIn(ExperimentalForeignApi::class)

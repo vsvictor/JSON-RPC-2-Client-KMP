@@ -116,7 +116,19 @@ internal data class NativeConnectionOptions(
     }
 }
 
+/** Receives server-to-client notifications pushed over the connection's own transport. */
+interface RpcCallbackListener {
+    /** [paramsJson] is the notification's `params` serialized as JSON, if present. */
+    fun onCallback(method: String, paramsJson: String?)
+
+    /** The push stream was interrupted; the native listener retries on its own. */
+    fun onInterrupted() {}
+}
+
 internal interface PlatformRpcClient {
+    fun startCallbacks(listener: RpcCallbackListener): Unit =
+        throw UnsupportedOperationException("Server callbacks are not supported by this client")
+    fun stopCallbacks() {}
     fun call(method: String, paramsJson: String?): String
     fun notify(method: String, paramsJson: String?)
     fun transportPing()
@@ -149,6 +161,21 @@ class JsonRpcClient internal constructor(private val native: PlatformRpcClient) 
             checkConnected()
             native.notify(method, paramsJson)
         }
+
+    /**
+     * Starts receiving server callbacks on the same transport as this client.
+     * Fails with [IllegalArgumentException]/[IllegalStateException] when the
+     * transport cannot receive server pushes (see the transport support table).
+     */
+    suspend fun startCallbacks(listener: RpcCallbackListener) = withContext(Dispatchers.Default) {
+        checkConnected()
+        native.startCallbacks(listener)
+    }
+
+    suspend fun stopCallbacks() = withContext(Dispatchers.Default) {
+        checkConnected()
+        native.stopCallbacks()
+    }
 
     suspend fun transportPing() = withContext(Dispatchers.Default) {
         checkConnected()

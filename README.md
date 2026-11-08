@@ -68,11 +68,11 @@ Each periodic ping and each restore attempt has a deadline equal to the configur
 In **Runtime controls**, **Log every periodic ping-pong** only controls visibility of native Ping/Pong events; it never starts a separate loop or disables recovery. Errors and recovery/reconnection events remain visible regardless of the checkbox. The panel retains the latest 500 entries. The native log buffer retains 512 entries and reports any overflow when drained. `client.takeLivenessLog()` drains these events without sending network traffic.
 
 Native recovery, logging, and bounded lifecycle APIs are included in upstream JSON-RPC-2
-commit `e90318f1052d5b7b253c7e4c824aa53404703d23`, pinned by `scripts/build-mobile.sh`.
+commit `803075d1db081fb670edea450b178927aecd4c47`, pinned by `scripts/build-mobile.sh`.
 No additional lifecycle patch is applied.
 
 Нативне відновлення, логування та API життєвого циклу з тайм-аутами включені в коміт
-JSON-RPC-2 `e90318f1052d5b7b253c7e4c824aa53404703d23`, зафіксований у `scripts/build-mobile.sh`.
+JSON-RPC-2 `803075d1db081fb670edea450b178927aecd4c47`, зафіксований у `scripts/build-mobile.sh`.
 Додатковий патч життєвого циклу не накладається.
 
 ### Application-owned lifecycle / Життєвий цикл під керуванням застосунку
@@ -100,6 +100,20 @@ these APIs.
 зберігають сумісність. Резервні транспорти, пороги повторів, підвищення транспорту й закриття
 старих/кандидатних з'єднань контролює застосунок. Після оновлення API потрібно перезібрати
 нативні артефакти та згенеровані прив'язки.
+
+## Server callbacks / Серверні callback-и
+
+`client.startCallbacks(listener)` delivers server-pushed JSON-RPC notifications to
+`RpcCallbackListener.onCallback(method, paramsJson)` over the same transport as the direct
+connection; `client.stopCallbacks()` stops delivery. Supported: TCP, TLS (line framing), QUIC, SRT,
+WebSocket-over-SRT. Other transports fail with `InvalidConfiguration`. The backend must register the
+connection with the gateway first. Requires the native library pinned at `803075d`.
+
+`client.startCallbacks(listener)` доставляє серверні JSON-RPC-сповіщення в
+`RpcCallbackListener.onCallback(method, paramsJson)` тим самим транспортом, що й пряме з'єднання;
+`client.stopCallbacks()` зупиняє доставку. Підтримуються TCP, TLS (line framing), QUIC, SRT,
+WebSocket-over-SRT. На інших транспортах — `InvalidConfiguration`. Бекенд має спершу зареєструвати
+з'єднання в gateway. Потрібна нативна бібліотека з піном `803075d`.
 
 ## Certificates and platform assets
 

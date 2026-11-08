@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UPSTREAM_URL="https://github.com/vsvictor/JSON-RPC-2.git"
-UPSTREAM_REF="${JSON_RPC_2_REF:-e90318f1052d5b7b253c7e4c824aa53404703d23}"
+UPSTREAM_REF="${JSON_RPC_2_REF:-803075d1db081fb670edea450b178927aecd4c47}"
 UPSTREAM_DIR="${JSON_RPC_2_DIR:-$PROJECT_ROOT/build/upstream/JSON-RPC-2}"
 if [[ ! -f "$UPSTREAM_DIR/Cargo.toml" && -e "$UPSTREAM_DIR" ]]; then
     UPSTREAM_DIR="${UPSTREAM_DIR}-refreshed"
