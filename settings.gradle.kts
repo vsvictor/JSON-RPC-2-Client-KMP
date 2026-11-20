@@ -14,4 +14,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "JsonRPCClientKMP"
+rootProject.name = "client-kmp"

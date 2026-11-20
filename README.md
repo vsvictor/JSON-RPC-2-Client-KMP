@@ -15,6 +15,41 @@ The project is a single Gradle KMP module at the repository root. No Rust crate 
 - Xcode command-line tools
 - Android SDK/NDK and `cargo-ndk` for Android builds
 
+## Publishing to GitHub Packages
+
+Push a version tag such as `v0.1.0` to build the Android and iOS native artifacts and
+publish the KMP library to GitHub Packages. The `Publish GitHub Packages` workflow performs
+both steps on macOS and uses the workflow's `GITHUB_TOKEN`; no package credentials are
+stored in the repository. The same workflow can be started manually with a package version.
+
+For local publishing, set `GITHUB_ACTOR` and `GITHUB_TOKEN` in the environment, then run:
+
+```sh
+./scripts/build-mobile.sh all
+./gradlew publishAllPublicationsToGitHubPackagesRepository -Pversion=0.1.0
+```
+
+`GITHUB_TOKEN` must have `write:packages` permission. Consumers need a GitHub token with
+`read:packages` permission because GitHub Packages requires authentication for downloads.
+
+## Публікація в GitHub Packages
+
+Надішліть тег версії, наприклад `v0.1.0`, щоб зібрати нативні артефакти Android та iOS і
+опублікувати KMP-бібліотеку в GitHub Packages. Workflow `Publish GitHub Packages` виконує
+обидва кроки на macOS, використовуючи `GITHUB_TOKEN` workflow; облікові дані не зберігаються
+в репозиторії. Workflow також можна запустити вручну, вказавши версію пакета.
+
+Для локальної публікації задайте `GITHUB_ACTOR` і `GITHUB_TOKEN`, а потім виконайте:
+
+```sh
+./scripts/build-mobile.sh all
+./gradlew publishAllPublicationsToGitHubPackagesRepository -Pversion=0.1.0
+```
+
+Для `GITHUB_TOKEN` потрібен дозвіл `write:packages`. Для завантаження пакета споживачам
+потрібен GitHub token із дозволом `read:packages`, оскільки GitHub Packages вимагає
+автентифікацію.
+
 ### Android C++ runtime
 
 The client module automatically packages `libc++_shared.so` for all four Android ABIs into its AAR. Apps depending on this module receive the runtime transitively; no app-side copy step or manual script invocation is needed.

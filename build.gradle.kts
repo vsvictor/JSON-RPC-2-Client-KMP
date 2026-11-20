@@ -1,12 +1,17 @@
 import com.android.build.api.variant.KotlinMultiplatformAndroidComponentsExtension
 import java.io.File
+import org.gradle.api.publish.PublishingExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.CInteropProcess
 
 plugins {
-    kotlin("multiplatform") version "2.4.20"
+    kotlin("multiplatform") version "2.4.21"
     id("com.android.kotlin.multiplatform.library") version "9.1.1"
+    id("maven-publish")
 }
+
+group = "com.vsvictor.jsonrpckmp"
+version = providers.gradleProperty("version").getOrElse("0.1.0")
 
 tasks.withType<CInteropProcess>().configureEach {
     inputs.file(project.file("src/iosMain/cinterop/jsonrpc_bridge.h"))
@@ -75,6 +80,7 @@ kotlin {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
+
         withHostTest {}
         withDeviceTestBuilder {
             sourceSetTreeName = "test"
@@ -85,6 +91,7 @@ kotlin {
 
     val iosDevice = iosArm64()
     val iosSimulator = iosSimulatorArm64()
+    val isMacOs = System.getProperty("os.name").startsWith("Mac", ignoreCase = true)
     listOf(iosDevice, iosSimulator).forEach { target ->
         target.binaries.framework {
             baseName = "JsonRPCClientKMP"
@@ -100,18 +107,21 @@ kotlin {
         }
         // Test executables are linked by Kotlin/Native (not Xcode), so the Swift runtime that the
         // native bridge depends on must be added explicitly.
-        target.binaries.withType<org.jetbrains.kotlin.gradle.plugin.mpp.TestExecutable>().configureEach {
-            val sdk = if (target.name == "iosArm64") "iphoneos" else "iphonesimulator"
-            val developerDir = providers.exec { commandLine("xcode-select", "-p") }
-                .standardOutput.asText.get().trim()
-            val sdkPath = providers.exec { commandLine("xcrun", "--sdk", sdk, "--show-sdk-path") }
-                .standardOutput.asText.get().trim()
-            linkerOpts(
-                "-L$developerDir/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$sdk",
-                "-L$sdkPath/usr/lib/swift",
-                "-rpath", "/usr/lib/swift",
-            )
+        if (isMacOs) {
+            target.binaries.withType<org.jetbrains.kotlin.gradle.plugin.mpp.TestExecutable>().configureEach {
+                val sdk = if (target.name == "iosArm64") "iphoneos" else "iphonesimulator"
+                val developerDir = providers.exec { commandLine("xcode-select", "-p") }
+                    .standardOutput.asText.get().trim()
+                val sdkPath = providers.exec { commandLine("xcrun", "--sdk", sdk, "--show-sdk-path") }
+                    .standardOutput.asText.get().trim()
+                linkerOpts(
+                    "-L$developerDir/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$sdk",
+                    "-L$sdkPath/usr/lib/swift",
+                    "-rpath", "/usr/lib/swift",
+                )
+            }
         }
+
         target.compilations.getByName("main").cinterops.create("jsonrpcBridge") {
             defFile(project.file("src/iosMain/cinterop/jsonrpc_bridge.def"))
             compilerOpts("-I${project.projectDir}/src/iosMain/cinterop")
@@ -135,6 +145,21 @@ kotlin {
         getByName("androidDeviceTest").dependencies {
             implementation("androidx.test:runner:1.7.0")
             implementation("androidx.test.ext:junit:1.3.0")
+        }
+    }
+}
+
+extensions.configure<PublishingExtension> {
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/vsvictor/JSON-RPC-2-Client-KMP")
+            credentials {
+                username = providers.gradleProperty("gpr.user").orNull
+                    ?: providers.environmentVariable("GITHUB_ACTOR").orNull
+                password = providers.gradleProperty("gpr.key").orNull
+                    ?: providers.environmentVariable("GITHUB_TOKEN").orNull
+            }
         }
     }
 }
