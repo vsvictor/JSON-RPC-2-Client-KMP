@@ -5,6 +5,7 @@ import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_connect
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_disconnect
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_notify
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_release
+import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_receive_incoming
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_restore_connection
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_set_max_missed_pongs
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_set_ping_frequency
@@ -12,6 +13,7 @@ import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_set_request_timeout
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_transport_ping
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_transport_ping_with_timeout
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_take_liveness_log
+import com.vsvictor.jsonrpckmp.ffi.jsonrpc_client_supports_incoming
 import com.vsvictor.jsonrpckmp.ffi.jsonrpc_string_free
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
@@ -117,6 +119,26 @@ private class IosRpcClient(private val handle: COpaquePointer) : PlatformRpcClie
             result.toKString()
         } finally {
             jsonrpc_string_free(result)
+        }
+    }
+    override fun supportsIncoming(): Boolean = jsonrpc_client_supports_incoming(handle) != 0
+    override fun receiveIncoming(timeoutMillis: ULong): String? = memScoped {
+        val message = alloc<CPointerVar<ByteVar>>()
+        val error = alloc<CPointerVar<ByteVar>>()
+        message.value = null
+        error.value = null
+        when (jsonrpc_client_receive_incoming(handle, timeoutMillis, message.ptr, error.ptr)) {
+            1 -> {
+                val value = message.value
+                    ?: throw IllegalStateException("Incoming message was returned without data")
+                try {
+                    value.toKString()
+                } finally {
+                    jsonrpc_string_free(value)
+                }
+            }
+            0 -> null
+            else -> throw ffiException(error.value)
         }
     }
     override fun release() = jsonrpc_client_release(handle)

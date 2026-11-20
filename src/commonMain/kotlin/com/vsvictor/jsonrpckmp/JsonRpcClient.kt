@@ -1,6 +1,10 @@
 package com.vsvictor.jsonrpckmp
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -126,6 +130,8 @@ internal interface PlatformRpcClient {
     fun setMaxMissedPongs(count: UInt)
     fun setRequestTimeout(timeoutMillis: ULong)
     fun takeLivenessLog(): String
+    fun supportsIncoming(): Boolean
+    fun receiveIncoming(timeoutMillis: ULong): String?
     fun disconnect()
     fun release()
 }
@@ -199,6 +205,45 @@ class JsonRpcClient internal constructor(private val native: PlatformRpcClient) 
             native.takeLivenessLog().lineSequence().filter(String::isNotEmpty).toList()
         }
     }
+
+    /**
+     * Whether this transport can receive server-initiated messages. Currently
+     * supported by TCP, TLS, and QUIC.
+     */
+    fun supportsIncoming(): Boolean {
+        checkConnected()
+        return native.supportsIncoming()
+    }
+
+    /**
+     * A cold stream of server-initiated UTF-8 JSON messages. Collect at most
+     * once per client; cancelling collection stops polling within the selected
+     * poll interval. Transports without incoming-message support complete
+     * without emitting.
+     */
+    fun incomingMessages(pollIntervalMillis: ULong = 1_000uL): Flow<String> = flow {
+        require(pollIntervalMillis > 0uL) {
+            "Incoming-message poll interval must be greater than zero"
+        }
+        if (!supportsIncoming()) return@flow
+        while (currentCoroutineContext().isActive) {
+            receiveIncoming(pollIntervalMillis)?.let { emit(it) }
+        }
+    }
+
+    suspend fun receiveIncoming(timeoutMillis: ULong): String? =
+        withContext(Dispatchers.Default) {
+            require(timeoutMillis > 0uL) {
+                "Incoming-message timeout must be greater than zero"
+            }
+            checkConnected()
+            if (!native.supportsIncoming()) {
+                throw UnsupportedOperationException(
+                    "The selected transport does not support incoming messages",
+                )
+            }
+            native.receiveIncoming(timeoutMillis)
+        }
 
     suspend fun disconnect() = withContext(Dispatchers.Default) {
         lifecycleMutex.withLock {

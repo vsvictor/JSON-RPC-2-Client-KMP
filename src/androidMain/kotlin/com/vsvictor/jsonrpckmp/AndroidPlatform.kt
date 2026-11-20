@@ -63,6 +63,9 @@ private class AndroidRpcClient(private val client: RustRpcClient) : PlatformRpcC
     override fun setMaxMissedPongs(count: UInt) = client.setMaxMissedPongs(count)
     override fun setRequestTimeout(timeoutMillis: ULong) = client.setRequestTimeoutMs(timeoutMillis)
     override fun takeLivenessLog() = client.takeLivenessLog()
+    override fun supportsIncoming() = client.supportsIncoming()
+    override fun receiveIncoming(timeoutMillis: ULong) =
+        client.recvIncomingWithTimeout(timeoutMillis)
     override fun disconnect() = client.disconnect()
     override fun release() = client.close()
 }

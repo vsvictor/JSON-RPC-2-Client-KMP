@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UPSTREAM_URL="https://github.com/vsvictor/JSON-RPC-2.git"
-UPSTREAM_REF="${JSON_RPC_2_REF:-e90318f1052d5b7b253c7e4c824aa53404703d23}"
+UPSTREAM_REF="${JSON_RPC_2_REF:-af8d04dbbaee05fa1514caa07a37808d5973d100}"
 UPSTREAM_DIR="${JSON_RPC_2_DIR:-$PROJECT_ROOT/build/upstream/JSON-RPC-2}"
 if [[ ! -f "$UPSTREAM_DIR/Cargo.toml" && -e "$UPSTREAM_DIR" ]]; then
     UPSTREAM_DIR="${UPSTREAM_DIR}-refreshed"
@@ -88,6 +88,15 @@ PY
 # tstrans-srt-sys build script needs BOTH search modes to find its bundled
 # mbedTLS prefix during cross compilation. Patch a disposable local copy rather
 # than editing Cargo's registry cache.
+python3 - "$UPSTREAM_DIR/Cargo.toml" <<'PY'
+from pathlib import Path
+import sys
+
+manifest = Path(sys.argv[1])
+text = manifest.read_text()
+overlay_patch = 'tstrans-srt-sys = { path = "build/mobile-overlays/tstrans-srt-sys" }\n'
+manifest.write_text(text.replace(overlay_patch, ""))
+PY
 cargo fetch --manifest-path "$UPSTREAM_DIR/Cargo.toml"
 python3 - "$UPSTREAM_DIR" "${CARGO_HOME:-$HOME/.cargo}/registry/src" <<'PY'
 from pathlib import Path

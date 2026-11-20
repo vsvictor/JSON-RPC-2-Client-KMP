@@ -183,6 +183,41 @@ public func jsonrpc_client_take_liveness_log(
     }
 }
 
+@_cdecl("jsonrpc_client_supports_incoming")
+public func jsonrpc_client_supports_incoming(
+    _ pointer: UnsafeMutableRawPointer?
+) -> Int32 {
+    guard let pointer else { return 0 }
+    return nativeClient(pointer).client.supportsIncoming() ? 1 : 0
+}
+
+@_cdecl("jsonrpc_client_receive_incoming")
+public func jsonrpc_client_receive_incoming(
+    _ pointer: UnsafeMutableRawPointer?,
+    _ timeout: UInt64,
+    _ messageOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?,
+    _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Int32 {
+    messageOut?.pointee = nil
+    errorOut?.pointee = nil
+    do {
+        guard let pointer else {
+            throw JsonRpcBridgeError.invalidOptions("Client handle is null")
+        }
+        if let message = try nativeClient(pointer).client.recvIncomingWithTimeout(timeoutMs: timeout) {
+            guard let allocated = strdup(message) else {
+                throw JsonRpcBridgeError.invalidOptions("Unable to allocate incoming message")
+            }
+            messageOut?.pointee = allocated
+            return 1
+        }
+        return 0
+    } catch {
+        writeError(error, to: errorOut)
+        return -1
+    }
+}
+
 @_cdecl("jsonrpc_client_notify")
 public func jsonrpc_client_notify(
     _ pointer: UnsafeMutableRawPointer?,

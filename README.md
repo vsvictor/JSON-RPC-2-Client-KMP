@@ -17,7 +17,7 @@ The project is a single Gradle KMP module at the repository root. No Rust crate 
 
 ## Publishing to GitHub Packages
 
-Push a version tag such as `v0.1.0` to build the Android and iOS native artifacts and
+Push a version tag such as `v0.2.0` to build the Android and iOS native artifacts and
 publish the KMP library to GitHub Packages. The `Publish GitHub Packages` workflow performs
 both steps on macOS and uses the workflow's `GITHUB_TOKEN`; no package credentials are
 stored in the repository. The same workflow can be started manually with a package version.
@@ -26,7 +26,7 @@ For local publishing, set `GITHUB_ACTOR` and `GITHUB_TOKEN` in the environment, 
 
 ```sh
 ./scripts/build-mobile.sh all
-./gradlew publishAllPublicationsToGitHubPackagesRepository -Pversion=0.1.0
+./gradlew publishAllPublicationsToGitHubPackagesRepository -Pversion=0.2.0
 ```
 
 `GITHUB_TOKEN` must have `write:packages` permission. Consumers need a GitHub token with
@@ -34,7 +34,7 @@ For local publishing, set `GITHUB_ACTOR` and `GITHUB_TOKEN` in the environment, 
 
 ## Публікація в GitHub Packages
 
-Надішліть тег версії, наприклад `v0.1.0`, щоб зібрати нативні артефакти Android та iOS і
+Надішліть тег версії, наприклад `v0.2.0`, щоб зібрати нативні артефакти Android та iOS і
 опублікувати KMP-бібліотеку в GitHub Packages. Workflow `Publish GitHub Packages` виконує
 обидва кроки на macOS, використовуючи `GITHUB_TOKEN` workflow; облікові дані не зберігаються
 в репозиторії. Workflow також можна запустити вручну, вказавши версію пакета.
@@ -43,7 +43,7 @@ For local publishing, set `GITHUB_ACTOR` and `GITHUB_TOKEN` in the environment, 
 
 ```sh
 ./scripts/build-mobile.sh all
-./gradlew publishAllPublicationsToGitHubPackagesRepository -Pversion=0.1.0
+./gradlew publishAllPublicationsToGitHubPackagesRepository -Pversion=0.2.0
 ```
 
 Для `GITHUB_TOKEN` потрібен дозвіл `write:packages`. Для завантаження пакета споживачам
@@ -90,7 +90,11 @@ client.disconnect()
 
 `call` returns the JSON-encoded `result`; `paramsJson` must be a JSON object or array, as required by the Rust FFI. `notify`, ping controls, and request-timeout configuration are available on the same client. Native blocking calls are dispatched off the caller thread.
 
+For server-initiated notifications, collect `client.incomingMessages()`. The stream currently works with TCP, TLS, and QUIC; it emits each UTF-8 JSON message as received and stops polling promptly when collection is cancelled. Only one collector should be active per client.
+
 The sample app records connection setup stages, operation outcomes, and full error stack traces in its **Connection and error log** panel and standard output. Certificate contents and passphrases are not included in the log.
+
+Для повідомлень, ініційованих сервером, збирайте `client.incomingMessages()`. Потік наразі працює з TCP, TLS і QUIC, передає кожне UTF-8 JSON-повідомлення та швидко зупиняється після скасування збору. Для кожного клієнта має бути не більше одного активного збирача.
 
 ## Connection monitoring and recovery
 
@@ -102,13 +106,13 @@ Each periodic ping and each restore attempt has a deadline equal to the configur
 
 In **Runtime controls**, **Log every periodic ping-pong** only controls visibility of native Ping/Pong events; it never starts a separate loop or disables recovery. Errors and recovery/reconnection events remain visible regardless of the checkbox. The panel retains the latest 500 entries. The native log buffer retains 512 entries and reports any overflow when drained. `client.takeLivenessLog()` drains these events without sending network traffic.
 
-Native recovery, logging, and bounded lifecycle APIs are included in upstream JSON-RPC-2
-commit `e90318f1052d5b7b253c7e4c824aa53404703d23`, pinned by `scripts/build-mobile.sh`.
-No additional lifecycle patch is applied.
+Native recovery, logging, bounded lifecycle, and incoming-message APIs are included in
+upstream JSON-RPC-2 commit `af8d04dbbaee05fa1514caa07a37808d5973d100`, pinned by
+`scripts/build-mobile.sh`. No additional lifecycle patch is applied.
 
-Нативне відновлення, логування та API життєвого циклу з тайм-аутами включені в коміт
-JSON-RPC-2 `e90318f1052d5b7b253c7e4c824aa53404703d23`, зафіксований у `scripts/build-mobile.sh`.
-Додатковий патч життєвого циклу не накладається.
+Нативне відновлення, логування, API життєвого циклу з тайм-аутами та API вхідних повідомлень
+включені в коміт JSON-RPC-2 `af8d04dbbaee05fa1514caa07a37808d5973d100`, зафіксований у
+`scripts/build-mobile.sh`. Додатковий патч життєвого циклу не накладається.
 
 ### Application-owned lifecycle / Життєвий цикл під керуванням застосунку
 

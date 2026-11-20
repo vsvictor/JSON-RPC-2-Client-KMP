@@ -94,6 +94,8 @@ class ConnectionLifecycleApiTest {
         override fun setMaxMissedPongs(count: UInt) = Unit
         override fun setRequestTimeout(timeoutMillis: ULong) = Unit
         override fun takeLivenessLog() = ""
+        override fun supportsIncoming() = true
+        override fun receiveIncoming(timeoutMillis: ULong): String? = null
         override fun disconnect() {
             calls += "disconnect"
         }

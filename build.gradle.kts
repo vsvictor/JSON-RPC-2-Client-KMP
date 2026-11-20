@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "com.vsvictor.jsonrpckmp"
-version = providers.gradleProperty("version").getOrElse("0.1.0")
+version = providers.gradleProperty("version").getOrElse("0.2.0")
 
 tasks.withType<CInteropProcess>().configureEach {
     inputs.file(project.file("src/iosMain/cinterop/jsonrpc_bridge.h"))

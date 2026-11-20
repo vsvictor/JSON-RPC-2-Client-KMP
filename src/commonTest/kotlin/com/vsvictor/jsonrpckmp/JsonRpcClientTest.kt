@@ -2,6 +2,8 @@ package com.vsvictor.jsonrpckmp
 
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -99,10 +101,50 @@ class JsonRpcClientTest {
         assertEquals(listOf("PING: 1", "PONG: 1", "ERROR: lost"), JsonRpcClient(native).takeLivenessLog())
     }
 
+    @Test
+    fun incomingMessagesAreReceivedInOrder() = runTest {
+        val native = RecordingClient(incoming = mutableListOf("""{"eventType":"logout"}"""))
+        val client = JsonRpcClient(native)
+
+        assertTrue(client.supportsIncoming())
+        assertEquals(
+            listOf("""{"eventType":"logout"}"""),
+            client.incomingMessages(pollIntervalMillis = 1uL).take(1).toList(),
+        )
+        assertEquals(listOf("receive 1"), native.calls)
+    }
+
+    @Test
+    fun incomingMessagesCompleteImmediatelyForUnsupportedTransports() = runTest {
+        val native = RecordingClient(incomingSupported = false)
+        val client = JsonRpcClient(native)
+
+        assertTrue(client.incomingMessages().toList().isEmpty())
+        assertTrue(native.calls.isEmpty())
+    }
+
+    @Test
+    fun receiveIncomingRequiresPositiveTimeoutAndSupportedTransport() = runTest {
+        val unsupported = JsonRpcClient(RecordingClient(incomingSupported = false))
+
+        assertFailsWith<IllegalArgumentException> { unsupported.receiveIncoming(0uL) }
+        assertFailsWith<UnsupportedOperationException> { unsupported.receiveIncoming(1uL) }
+    }
+
+    @Test
+    fun supportsIncomingFailsAfterDisconnect() = runTest {
+        val client = JsonRpcClient(RecordingClient())
+        client.disconnect()
+
+        assertFailsWith<IllegalStateException> { client.supportsIncoming() }
+    }
+
     private class RecordingClient(
         private val callError: Throwable? = null,
         private val disconnectError: Throwable? = null,
         private var log: String = "",
+        private val incomingSupported: Boolean = true,
+        private val incoming: MutableList<String> = mutableListOf(),
     ) : PlatformRpcClient {
         val calls = mutableListOf<String>()
 
@@ -141,6 +183,13 @@ class JsonRpcClientTest {
         }
 
         override fun takeLivenessLog(): String = log.also { log = "" }
+
+        override fun supportsIncoming(): Boolean = incomingSupported
+
+        override fun receiveIncoming(timeoutMillis: ULong): String? {
+            calls += "receive $timeoutMillis"
+            return incoming.removeFirstOrNull()
+        }
 
         override fun disconnect() {
             calls += "disconnect"
