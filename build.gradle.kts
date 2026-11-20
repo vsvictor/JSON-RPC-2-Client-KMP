@@ -75,7 +75,7 @@ extensions.configure<KotlinMultiplatformAndroidComponentsExtension> {
 kotlin {
     android {
         namespace = "com.vsvictor.jsonrpckmp"
-        compileSdk = 37
+        compileSdk = 36
         minSdk = 24
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
