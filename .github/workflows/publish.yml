@@ -35,7 +35,7 @@ jobs:
         run: |
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$sdkmanager" --licenses
-          "$sdkmanager" --install "platforms;android-37" "ndk;30.0.15729638"
+          "$sdkmanager" --channel=3 --install "platforms;android-37" "ndk;30.0.15729638"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
