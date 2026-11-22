@@ -2,6 +2,23 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${JSON_RPC_MOBILE_BUILD_LOCKED:-}" != "1" ]]; then
+    mkdir -p "$PROJECT_ROOT/build"
+    exec python3 - "$PROJECT_ROOT/build/mobile-build.lock" "$0" "$@" <<'PY'
+import fcntl
+import os
+import subprocess
+import sys
+
+lock_path, script, *args = sys.argv[1:]
+with open(lock_path, "w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    env = os.environ.copy()
+    env["JSON_RPC_MOBILE_BUILD_LOCKED"] = "1"
+    raise SystemExit(subprocess.run(["bash", script, *args], env=env).returncode)
+PY
+fi
+
 UPSTREAM_URL="https://github.com/vsvictor/JSON-RPC-2.git"
 UPSTREAM_REF="${JSON_RPC_2_REF:-803075d1db081fb670edea450b178927aecd4c47}"
 UPSTREAM_DIR="${JSON_RPC_2_DIR:-$PROJECT_ROOT/build/upstream/JSON-RPC-2}"
